@@ -14,15 +14,13 @@ jobs:
         platform: [macos-latest, ubuntu-22_04, windows-latest]
 
     runs-on: ${{ matrix.platform }}
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install Node.js
         uses: actions/setup-node@v4
-        with:
-          node-version: 20
 
       - name: Install pnpm
         uses: pnpm/action-setup@v3
@@ -31,14 +29,15 @@ jobs:
           run_install: false
 
       - name: Get pnpm store directory
+        id: pnpm-cache
         shell: bash
         run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
 
       - name: Setup pnpm cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.STORE_PATH }}
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
@@ -66,7 +65,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: app-v__VERSION__
-          releaseName: 'App v__VERSION__'
-          releaseBody: 'Automatic release built from main branch.'
+          releaseName: "App v__VERSION__"
+          releaseBody: "Automatic release built from main branch."
           releaseDraft: true
           prerelease: false
