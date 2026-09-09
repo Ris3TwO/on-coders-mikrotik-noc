@@ -7,6 +7,10 @@
     "core:event:default",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
-    "opener:default"
+    "opener:default",
+    "store:default",
+    "updater:default",
+    "dialog:default",
+    "process:allow-restart"
   ]
 }

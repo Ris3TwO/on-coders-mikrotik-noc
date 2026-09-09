@@ -90,5 +90,34 @@
     "offline": "Offline",
     "online": "Online",
     "realTimeUpdates": "Real-time Updates"
+  },
+  "updater": {
+    "banner": {
+      "text": "New version v{version} available.",
+      "action": "Update & Relaunch",
+      "updating": "Updating..."
+    },
+    "notify": {
+      "available": {
+        "title": "Version {version} available",
+        "text": "A new version is ready to download and install."
+      },
+      "latest": {
+        "title": "System up to date",
+        "text": "You are running the latest version."
+      },
+      "installing": {
+        "title": "Downloading update",
+        "text": "The application will automatically restart once finished..."
+      },
+      "error": {
+        "title": "Update check failed",
+        "text": "Could not connect to the release server."
+      },
+      "installFailed": {
+        "title": "Installation failed",
+        "text": "Failed to download or install the update package."
+      }
+    }
   }
 }

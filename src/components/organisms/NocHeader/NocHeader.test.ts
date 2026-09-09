@@ -2,16 +2,23 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import NocHeader from "./NocHeader.vue";
-import { DeviceMeta } from "@/types";
+import type { DeviceMeta } from "@/types";
+import { useDeviceStore } from "@/stores/deviceStore";
 import { notify } from "@kyvg/vue3-notification";
 
-vi.mock("@kyvg/vue3-notification");
-
-vi.mock("vue-i18n", () => ({
-  useI18n: () => ({
-    t: (key: string) => key,
-  }),
+vi.mock("@/lib/api", () => ({
+  disconnectDevice: vi.fn().mockResolvedValue(undefined),
 }));
+
+vi.mock("@/lib/secureStore", () => ({
+  clearPasswordOnly: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@kyvg/vue3-notification", () => ({
+  notify: vi.fn(),
+}));
+
+vi.mock("vue-i18n");
 
 vi.mock("@/components/atoms/StatusDot/StatusDot.vue", () => ({
   default: {
@@ -69,20 +76,19 @@ describe("NocHeader.vue", () => {
     expect(wrapper.find('[data-testid="status-dot"]').attributes("data-connected")).toBe("false");
   });
 
-  it("should clear localStorage, reset device store, notify, and emit logout event on disconnect", async () => {
-    localStorage.setItem("mikrotik_pass", "secret123");
+  it("should trigger deviceStore.handleLogout and clear session on disconnect button click", async () => {
     const wrapper = createWrapper(true, { interface: "wlan1" });
+    const store = useDeviceStore();
+    const handleLogoutSpy = vi.spyOn(store, "handleLogout");
 
     const disconnectButton = wrapper.find("button");
     await disconnectButton.trigger("click");
 
-    expect(localStorage.getItem("mikrotik_pass")).toBeNull();
+    expect(handleLogoutSpy).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith({
       title: "logout.notify.success.title",
       text: "logout.notify.success.text",
       type: "info",
     });
-    expect(wrapper.emitted("logout")).toBeTruthy();
-    expect(wrapper.emitted("logout")?.length).toBe(1);
   });
 });

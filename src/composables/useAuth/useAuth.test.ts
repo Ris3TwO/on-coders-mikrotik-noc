@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { nextTick } from "vue";
-import { mount } from "@vue/test-utils";
+import { mount, flushPromises } from "@vue/test-utils";
 import { useAuth } from "./useAuth";
 import { invoke } from "@tauri-apps/api/core";
 import { notify } from "@kyvg/vue3-notification";
+import { getCredentials, saveCredentials } from "@/lib/secureStore";
 
-// Mock Tauri invoke and notifications
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
@@ -14,13 +13,19 @@ vi.mock("@kyvg/vue3-notification", () => ({
   notify: vi.fn(),
 }));
 
+vi.mock("@/lib/secureStore", () => ({
+  getCredentials: vi.fn(),
+  saveCredentials: vi.fn(),
+}));
+
 describe("useAuth composable", () => {
   const mockOnSuccess = vi.fn();
   const mockT = vi.fn((key: string) => key);
 
   beforeEach(() => {
     vi.clearAllMocks();
-    localStorage.clear();
+    vi.mocked(getCredentials).mockResolvedValue(null);
+    vi.mocked(saveCredentials).mockResolvedValue(undefined);
     vi.useFakeTimers();
   });
 
@@ -56,7 +61,8 @@ describe("useAuth composable", () => {
       template: "<div />",
     });
 
-    auth!.ip.value = ""; // Missing fields
+    await flushPromises();
+    auth!.ip.value = "";
 
     await auth!.handleLogin();
 
@@ -81,6 +87,8 @@ describe("useAuth composable", () => {
       template: "<div />",
     });
 
+    await flushPromises();
+
     auth!.ip.value = "192.168.88.1";
     auth!.user.value = "admin";
     auth!.pass.value = "secret";
@@ -88,8 +96,8 @@ describe("useAuth composable", () => {
 
     const loginPromise = auth!.handleLogin();
 
-    // Fast-forward the 1.5s timer embedded in handleLogin
     vi.advanceTimersByTime(1500);
+    await flushPromises();
     await loginPromise;
 
     expect(invoke).toHaveBeenCalledWith("test_mikrotik_connection", {
@@ -98,10 +106,13 @@ describe("useAuth composable", () => {
       pass: "secret",
     });
 
-    expect(localStorage.getItem("mikrotik_ip")).toBe("192.168.88.1");
-    expect(localStorage.getItem("mikrotik_user")).toBe("admin");
-    expect(localStorage.getItem("mikrotik_remember")).toBe("true");
-    expect(localStorage.getItem("mikrotik_pass")).toBe("secret");
+    expect(saveCredentials).toHaveBeenCalledWith({
+      ip: "192.168.88.1",
+      user: "admin",
+      pass: "secret",
+      port: 443,
+      useSsl: true,
+    });
 
     expect(notify).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -114,6 +125,8 @@ describe("useAuth composable", () => {
       ip: "192.168.88.1",
       user: "admin",
       pass: "secret",
+      port: 443,
+      useSsl: true,
     });
   });
 
@@ -129,31 +142,51 @@ describe("useAuth composable", () => {
       template: "<div />",
     });
 
+    await flushPromises();
+
     auth!.ip.value = "192.168.88.1";
     auth!.user.value = "admin";
-    auth!.pass.value = "secret";
+    auth!.pass.value = "wrong";
 
-    const loginPromise = auth!.handleLogin();
+    const loginPromise = auth!.handleLogin().catch(() => {});
 
     vi.advanceTimersByTime(1500);
-
-    // Expect the login promise to reject since the error is now rethrown
-    await expect(loginPromise).rejects.toThrow("Connection timeout");
+    await flushPromises();
+    await loginPromise;
 
     expect(notify).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "login.notify.error.authenticationFailed.title",
+        text: "login.notify.error.authenticationFailed.text",
         type: "error",
       })
     );
-    expect(mockOnSuccess).not.toHaveBeenCalled();
   });
 
-  it("should remove mikrotik_pass from localStorage when rememberPass is false", async () => {
-    // Pre-populate localStorage with an old password
-    localStorage.setItem("mikrotik_pass", "old-secret");
-    localStorage.setItem("mikrotik_remember", "false");
+  it("should log error when failing to load secure store credentials (line 43)", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
+    vi.mocked(getCredentials).mockRejectedValueOnce(new Error("Failed to access keyring"));
+
+    mount({
+      setup() {
+        useAuth(mockOnSuccess, mockT);
+        return {};
+      },
+      template: "<div />",
+    });
+
+    await flushPromises();
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "Failed to load secure store credentials:",
+      expect.any(Error)
+    );
+
+    consoleSpy.mockRestore();
+  });
+
+  it("should store empty string for pass in secureStore when rememberPass is false", async () => {
     vi.mocked(invoke).mockResolvedValueOnce(true);
 
     let auth: ReturnType<typeof useAuth>;
@@ -165,27 +198,35 @@ describe("useAuth composable", () => {
       template: "<div />",
     });
 
+    await flushPromises();
+
     auth!.ip.value = "192.168.88.1";
     auth!.user.value = "admin";
     auth!.pass.value = "secret";
-    auth!.rememberPass.value = false; // Ensure it's false
+    auth!.rememberPass.value = false;
 
     const loginPromise = auth!.handleLogin();
 
     vi.advanceTimersByTime(1500);
+    await flushPromises();
     await loginPromise;
 
-    // Verify that the password was removed from storage
-    expect(localStorage.getItem("mikrotik_pass")).toBeNull();
-    expect(localStorage.getItem("mikrotik_remember")).toBe("false");
+    expect(saveCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pass: "",
+      })
+    );
   });
 
   describe("onMounted auto-login", () => {
-    it("should load saved credentials from localStorage and trigger auto-login on mount", async () => {
-      localStorage.setItem("mikrotik_ip", "192.168.88.1");
-      localStorage.setItem("mikrotik_user", "admin");
-      localStorage.setItem("mikrotik_remember", "true");
-      localStorage.setItem("mikrotik_pass", "secret-pass");
+    it("should load saved credentials from secureStore and trigger auto-login on mount", async () => {
+      vi.mocked(getCredentials).mockResolvedValueOnce({
+        ip: "192.168.88.1",
+        user: "admin",
+        pass: "secret-pass",
+        port: 443,
+        useSsl: true,
+      });
 
       vi.mocked(invoke).mockResolvedValueOnce(true);
 
@@ -198,15 +239,15 @@ describe("useAuth composable", () => {
         template: "<div />",
       });
 
+      await flushPromises();
+
       expect(composableReturn.ip.value).toBe("192.168.88.1");
       expect(composableReturn.user.value).toBe("admin");
       expect(composableReturn.rememberPass.value).toBe(true);
       expect(composableReturn.pass.value).toBe("secret-pass");
 
-      // Fast-forward timers and flush async microtasks
       vi.advanceTimersByTime(1500);
-      await vi.runAllTimersAsync();
-      await nextTick();
+      await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("test_mikrotik_connection", {
         ip: "192.168.88.1",
@@ -217,10 +258,13 @@ describe("useAuth composable", () => {
     });
 
     it("should handle auto-login failure and notify error on mount", async () => {
-      localStorage.setItem("mikrotik_ip", "192.168.88.1");
-      localStorage.setItem("mikrotik_user", "admin");
-      localStorage.setItem("mikrotik_remember", "true");
-      localStorage.setItem("mikrotik_pass", "wrong-pass");
+      vi.mocked(getCredentials).mockResolvedValueOnce({
+        ip: "192.168.88.1",
+        user: "admin",
+        pass: "secret-pass",
+        port: 443,
+        useSsl: true,
+      });
 
       vi.mocked(invoke).mockRejectedValueOnce(new Error("Network error"));
 
@@ -232,26 +276,28 @@ describe("useAuth composable", () => {
         template: "<div />",
       });
 
+      await flushPromises();
       vi.advanceTimersByTime(1500);
-      await vi.runAllTimersAsync();
-      await nextTick();
+      await flushPromises();
 
       expect(notify).toHaveBeenCalledWith(
         expect.objectContaining({
-          title: "login.notify.error.authenticationFailed.title",
-          text: "login.notify.error.authenticationFailed.text",
+          title: "login.notify.error.auto_login_failed.title",
+          text: "Network error",
           type: "error",
         })
       );
     });
 
     it("should handle auto-login failure with non-Error rejection and use fallback notification text", async () => {
-      localStorage.setItem("mikrotik_ip", "192.168.88.1");
-      localStorage.setItem("mikrotik_user", "admin");
-      localStorage.setItem("mikrotik_remember", "true");
-      localStorage.setItem("mikrotik_pass", "wrong-pass");
+      vi.mocked(getCredentials).mockResolvedValueOnce({
+        ip: "192.168.88.1",
+        user: "admin",
+        pass: "secret-pass",
+        port: 443,
+        useSsl: true,
+      });
 
-      // Reject with a plain string instead of an Error object
       vi.mocked(invoke).mockRejectedValueOnce("Some raw string error");
 
       mount({
@@ -262,9 +308,9 @@ describe("useAuth composable", () => {
         template: "<div />",
       });
 
+      await flushPromises();
       vi.advanceTimersByTime(1500);
-      await vi.runAllTimersAsync();
-      await nextTick();
+      await flushPromises();
 
       expect(notify).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -273,6 +319,87 @@ describe("useAuth composable", () => {
           type: "error",
         })
       );
+    });
+
+    it("should fallback ip to empty string if savedCredentials.ip is falsy", async () => {
+      vi.mocked(getCredentials).mockResolvedValueOnce({
+        ip: "",
+        user: "admin",
+        pass: "secret-pass",
+        port: 443,
+        useSsl: true,
+      });
+
+      let composableReturn: any;
+      mount({
+        setup() {
+          composableReturn = useAuth(mockOnSuccess, mockT);
+          return {};
+        },
+        template: "<div />",
+      });
+
+      await flushPromises();
+
+      expect(composableReturn.ip.value).toBe("");
+    });
+
+    it("should NOT trigger handleLogin on mount if savedCredentials.pass is empty or falsy", async () => {
+      vi.mocked(getCredentials).mockResolvedValueOnce({
+        ip: "192.168.88.1",
+        user: "admin",
+        pass: "",
+        port: 443,
+        useSsl: true,
+      });
+
+      let composableReturn: any;
+      mount({
+        setup() {
+          composableReturn = useAuth(mockOnSuccess, mockT);
+          return {};
+        },
+        template: "<div />",
+      });
+
+      await flushPromises();
+
+      expect(composableReturn.ip.value).toBe("192.168.88.1");
+      expect(composableReturn.user.value).toBe("admin");
+      expect(composableReturn.pass.value).toBe("");
+      expect(composableReturn.rememberPass.value).toBe(false);
+
+      vi.advanceTimersByTime(1500);
+      await flushPromises();
+
+      expect(invoke).not.toHaveBeenCalled();
+      expect(mockOnSuccess).not.toHaveBeenCalled();
+    });
+
+    it("should fallback user and pass to empty strings if savedCredentials fields are falsy", async () => {
+      vi.mocked(getCredentials).mockResolvedValueOnce({
+        ip: "192.168.88.1",
+        user: undefined as any,
+        pass: undefined as any,
+        port: 443,
+        useSsl: true,
+      });
+
+      let composableReturn: any;
+      mount({
+        setup() {
+          composableReturn = useAuth(mockOnSuccess, mockT);
+          return {};
+        },
+        template: "<div />",
+      });
+
+      await flushPromises();
+
+      expect(composableReturn.user.value).toBe("");
+      expect(composableReturn.pass.value).toBe("");
+      expect(composableReturn.rememberPass.value).toBe(false);
+      expect(invoke).not.toHaveBeenCalled();
     });
   });
 });

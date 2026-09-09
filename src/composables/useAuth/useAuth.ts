@@ -1,18 +1,11 @@
 import { ref, onMounted } from "vue";
 import { notify } from "@kyvg/vue3-notification";
 import { invoke } from "@tauri-apps/api/core";
-import { LoginCredentials } from "@/types";
+import type { DeviceCredentials, LoginCredentials } from "@/types";
+import { saveCredentials, getCredentials } from "@/lib/secureStore";
 
-/**
- * Authentication composable to manage Mikrotik connection credentials,
- * local storage persistence, auto-login execution, and error handling.
- *
- * @param {function} onSuccess - Callback executed when authentication succeeds, passing credentials.
- * @param {function} t - Translation function for i18n support.
- * @returns Object containing reactive authentication state variables and the handleLogin method.
- */
 export const useAuth = (
-  onSuccess: (credentials: LoginCredentials) => void,
+  onSuccess: (credentials: LoginCredentials) => Promise<void> | void,
   t: (key: string, params?: Record<string, unknown>) => string
 ) => {
   const ip = ref<string>("");
@@ -22,30 +15,33 @@ export const useAuth = (
   const isLoading = ref<boolean>(false);
   const showPassword = ref<boolean>(false);
 
-  // Load saved credentials from local storage on mount and attempt auto-login if enabled
-  onMounted(() => {
-    ip.value = localStorage.getItem("mikrotik_ip") || "";
-    user.value = localStorage.getItem("mikrotik_user") || "";
-    const shouldRemember = localStorage.getItem("mikrotik_remember") === "true";
-    rememberPass.value = shouldRemember;
+  onMounted(async () => {
+    try {
+      const savedCredentials = await getCredentials();
 
-    if (shouldRemember && localStorage.getItem("mikrotik_pass")) {
-      pass.value = localStorage.getItem("mikrotik_pass") as string;
+      if (savedCredentials) {
+        ip.value = savedCredentials.ip || "";
+        user.value = savedCredentials.user || "";
+        pass.value = savedCredentials.pass || "";
 
-      handleLogin().catch((err) => {
-        notify({
-          title: t("login.notify.error.auto_login_failed.title"),
-          text: err instanceof Error ? err.message : t("login.notify.error.auto_login_failed.text"),
-          type: "error",
-        });
-      });
+        rememberPass.value = Boolean(savedCredentials.pass);
+
+        if (savedCredentials.pass) {
+          handleLogin().catch((err) => {
+            notify({
+              title: t("login.notify.error.auto_login_failed.title"),
+              text:
+                err instanceof Error ? err.message : t("login.notify.error.auto_login_failed.text"),
+              type: "error",
+            });
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load secure store credentials:", err);
     }
   });
 
-  /**
-   * Validates input fields, invokes the backend connection test command,
-   * handles local storage caching based on user preferences, and triggers notifications.
-   */
   const handleLogin = async (): Promise<void> => {
     const trimmedIp = ip.value.trim();
     const trimmedUser = user.value.trim();
@@ -70,25 +66,30 @@ export const useAuth = (
     try {
       await Promise.all([apiPromise, timerPromise]);
 
-      localStorage.setItem("mikrotik_ip", trimmedIp);
-      localStorage.setItem("mikrotik_user", trimmedUser);
-      localStorage.setItem("mikrotik_remember", String(rememberPass.value));
+      const credentials: DeviceCredentials = {
+        ip: trimmedIp,
+        user: trimmedUser,
+        pass: rememberPass.value ? pass.value : "",
+        port: 443,
+        useSsl: true,
+      };
 
-      if (rememberPass.value) {
-        localStorage.setItem("mikrotik_pass", pass.value);
-      } else {
-        localStorage.removeItem("mikrotik_pass");
-      }
+      await saveCredentials(credentials);
+
+      await onSuccess({
+        ...credentials,
+        pass: pass.value,
+      });
 
       notify({
         title: t("login.notify.success.title"),
         text: t("login.notify.success.text"),
         type: "success",
       });
-      onSuccess({ ip: trimmedIp, user: trimmedUser, pass: pass.value });
     } catch (err: unknown) {
       await timerPromise;
       const errorMsg = typeof err === "string" ? err : "Credenciales inválidas.";
+
       notify({
         title: t("login.notify.error.authenticationFailed.title"),
         text: t("login.notify.error.authenticationFailed.text", {
@@ -96,6 +97,7 @@ export const useAuth = (
         }),
         type: "error",
       });
+
       throw err;
     } finally {
       isLoading.value = false;

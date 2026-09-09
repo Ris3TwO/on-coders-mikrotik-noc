@@ -3,15 +3,13 @@
  * NOC Header component displaying active device metadata, real-time connection status,
  * and controls for session disconnection or logout.
  */
-import { notify } from "@kyvg/vue3-notification";
 import StatusDot from "@/components/atoms/StatusDot/StatusDot.vue";
-import { DeviceMeta } from "@/types";
+import type { DeviceMeta } from "@/types";
 import { useDeviceStore } from "@/stores/deviceStore";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
-
-const device = useDeviceStore();
+const deviceStore = useDeviceStore();
 
 defineProps<{
   /** Connection state indicator flag */
@@ -20,29 +18,11 @@ defineProps<{
   deviceMeta: DeviceMeta;
 }>();
 
-const emit = defineEmits<{
-  /** Event emitted when the user requests a session logout or disconnection */
-  (e: "logout"): void;
-}>();
-
 /**
- * Clears saved session credentials, resets the telemetry store state,
- * triggers a success notification, and emits the logout event.
- * 
- * @returns {void}
+ * Executes the global store logout action directly.
  */
-const handleDisconnect = (): void => {
-  localStorage.removeItem("mikrotik_pass");
-
-  device.reset();
-
-  notify({
-    title: t("logout.notify.success.title"),
-    text: t("logout.notify.success.text"),
-    type: "info",
-  });
-
-  emit("logout");
+const handleDisconnect = async (): Promise<void> => {
+  await deviceStore.handleLogout();
 };
 </script>
 

@@ -4,11 +4,7 @@ import { createPinia, setActivePinia } from "pinia";
 import MetricGrid from "./MetricGrid.vue";
 import { DeviceStatus } from "@/types";
 
-vi.mock("vue-i18n", () => ({
-  useI18n: () => ({
-    t: (key: string) => key,
-  }),
-}));
+vi.mock("vue-i18n");
 
 vi.mock("@/utils/formatters", () => ({
   formatBps: (bps: number) => `${bps ?? 0} bps`,
@@ -112,7 +108,6 @@ describe("MetricGrid.vue", () => {
       tx_bps: undefined,
     });
 
-    // Se valida que renderiza los fallbacks '--' o '0' definidos en las expresiones nulas del template
     expect(wrapper.text()).toContain("--");
     expect(wrapper.find('[data-testid="link-warning-alert"]').exists()).toBe(true);
   });

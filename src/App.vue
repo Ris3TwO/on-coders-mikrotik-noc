@@ -1,68 +1,22 @@
 <script setup lang="ts">
-/**
- * Root application component managing global authentication flow, real-time
- * telemetry subscription streams, traffic history buffers, and layout transitions
- * between the login gateway and the main NOC dashboard.
- */
-import { ref, reactive } from "vue";
+import { onMounted } from "vue";
+import { storeToRefs } from "pinia";
 import { useDeviceStore } from "@/stores/deviceStore";
-import { onStatusUpdate, connectDevice, disconnectDevice } from "@/lib/api";
-import { DeviceStatus, LoginCredentials, TrafficPoint } from "@/types";
 
 import LoginView from "@/components/views/LoginView/LoginView.vue";
 import DashboardView from "@/components/views/DashboardView/DashboardView.vue";
 import LanguageSelector from "@/components/molecules/LanguageSelector/LanguageSelector.vue";
+import { useUpdater } from "@/composables";
 
-const device = useDeviceStore();
-const isAuthenticated = ref<boolean>(false);
-const trafficHistory = reactive<TrafficPoint[]>([]);
-const ipAddress = ref<string>("");
+const deviceStore = useDeviceStore();
+const { isAuthenticated } = storeToRefs(deviceStore);
+const { handleLoginSuccess, handleLogout } = deviceStore;
 
-/**
- * Handles successful authentication by storing target device information,
- * establishing the real-time telemetry listener stream, appending traffic points
- * to the performance history buffer, and invoking the connection command.
- *
- * @param {LoginCredentials} credentials - Connection credentials containing IP, user, and password.
- * @returns {Promise<void>}
- */
-const handleLoginSuccess = async (credentials: LoginCredentials): Promise<void> => {
-  isAuthenticated.value = true;
-  ipAddress.value = credentials.ip;
+const { isDownloading, updateAvailable, newVersion, checkForUpdates, installUpdate } = useUpdater();
 
-  try {
-    await onStatusUpdate((payload: any) => {
-      device.updateStatus(payload);
-
-      if (payload.connected) {
-        const timeNow = new Date().toLocaleTimeString();
-        trafficHistory.push({
-          time: timeNow,
-          rx: payload.rx_bps || 0,
-          tx: payload.tx_bps || 0,
-        });
-        if (trafficHistory.length > 30) trafficHistory.shift();
-      }
-    });
-
-    await connectDevice(credentials.ip, credentials.user, credentials.pass);
-  } catch (error) {
-    console.error("Initialization failure:", error);
-  }
-};
-
-/**
- * Resets application state, clears the traffic history buffer,
- * terminates session indicators, and disconnects from the device backend.
- *
- * @returns {void}
- */
-const handleLogout = (): void => {
-  trafficHistory.length = 0;
-  ipAddress.value = "";
-  isAuthenticated.value = false;
-  disconnectDevice();
-};
+onMounted(async () => {
+  await checkForUpdates(true).catch(() => {});
+});
 </script>
 
 <template>
@@ -114,19 +68,32 @@ const handleLogout = (): void => {
     <LanguageSelector />
   </header>
 
-  <!-- Atomic login view -->
-  <LoginView v-if="!isAuthenticated" @login-success="handleLoginSuccess" />
+  <!-- Persistent Update Banner -->
+  <transition name="fade">
+    <div
+      v-if="updateAvailable"
+      class="w-full bg-brand-turquoise/10 border-b border-brand-turquoise/30 px-6 py-2.5 flex items-center justify-between text-xs font-mono z-40"
+    >
+      <div class="flex items-center gap-2">
+        <span class="inline-block w-2 h-2 rounded-full bg-brand-turquoise animate-pulse"></span>
+        <span class="text-main">
+          {{ $t("updater.banner.text", { version: newVersion }) }}
+        </span>
+      </div>
+
+      <button
+        @click="installUpdate"
+        :disabled="isDownloading"
+        class="px-3 py-1 font-semibold text-surface bg-brand-turquoise hover:bg-brand-turquoise/90 rounded-lg transition disabled:opacity-50 cursor-pointer"
+      >
+        {{ isDownloading ? $t("updater.banner.updating") : $t("updater.banner.action") }}
+      </button>
+    </div>
+  </transition>
 
   <!-- Main Dashboard View (Organizes Header, MetricGrid, and TrafficChart) -->
-  <DashboardView
-    v-else
-    :device="device as DeviceStatus"
-    :deviceMeta="{
-      name: device.device_name || '',
-      ip: ipAddress,
-      interface: device.iface || '',
-    }"
-    :trafficHistory="trafficHistory"
-    @logout="handleLogout"
-  />
+  <DashboardView v-if="isAuthenticated" @logout="handleLogout" />
+
+  <!-- Atomic login view -->
+  <LoginView v-else @login-success="handleLoginSuccess" />
 </template>

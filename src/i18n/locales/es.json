@@ -90,5 +90,34 @@
     "offline": "Desconectado",
     "online": "Conectado",
     "realTimeUpdates": "Actualizaciones en tiempo real"
+  },
+  "updater": {
+    "banner": {
+      "text": "Nueva versión v{version} disponible.",
+      "action": "Actualizar y Reiniciar",
+      "updating": "Actualizando..."
+    },
+    "notify": {
+      "available": {
+        "title": "Versión {version} disponible",
+        "text": "Hay una nueva versión lista para descargar e instalar."
+      },
+      "latest": {
+        "title": "Sistema actualizado",
+        "text": "Ya estás utilizando la versión más reciente."
+      },
+      "installing": {
+        "title": "Descargando actualización",
+        "text": "La aplicación se reiniciará automáticamente al finalizar..."
+      },
+      "error": {
+        "title": "Error de actualización",
+        "text": "No se pudo consultar el servidor de versiones."
+      },
+      "installFailed": {
+        "title": "Error de instalación",
+        "text": "No se pudo descargar o instalar la nueva versión."
+      }
+    }
   }
 }

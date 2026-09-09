@@ -1,3 +1,5 @@
+import { LoginCredentials } from "./auth.types";
+
 /**
  * Comprehensive real-time telemetry status data structure received from the MikroTik device.
  */
@@ -70,4 +72,9 @@ export interface TrafficPoint {
   rx: number;
   /** Outgoing traffic rate */
   tx: number;
+}
+
+export interface DeviceCredentials extends LoginCredentials {
+  port: number;
+  useSsl: boolean;
 }

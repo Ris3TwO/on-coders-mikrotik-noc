@@ -1,8 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import LoginView from "@/components/views/LoginView/LoginView.vue";
 import { createI18n } from "vue-i18n";
+import { createPinia, setActivePinia } from "pinia";
 import { ref } from "vue";
+import { useDeviceStore } from "@/stores/deviceStore";
 
 const mockIp = ref("192.168.88.1");
 const mockUser = ref("admin");
@@ -37,6 +39,12 @@ vi.mock("@/composables", () => ({
   },
 }));
 
+vi.mock("@/stores/deviceStore", () => ({
+  useDeviceStore: vi.fn(() => ({
+    handleLoginSuccess: vi.fn(),
+  })),
+}));
+
 const i18n = createI18n({
   legacy: false,
   locale: "en",
@@ -56,24 +64,41 @@ const i18n = createI18n({
 });
 
 describe("LoginView.vue", () => {
-  it("should render correctly and emit login-success with credentials on submit", async () => {
+  let pinia: ReturnType<typeof createPinia>;
+  let mockHandleLoginSuccess: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pinia = createPinia();
+    setActivePinia(pinia);
+
     mockIp.value = "192.168.88.1";
     mockUser.value = "admin";
     mockPass.value = "secret";
     mockRememberPass.value = false;
+    mockIsLoading.value = false;
+    mockShowPassword.value = false;
 
-    const wrapper = mount(LoginView, {
+    mockHandleLoginSuccess = vi.fn();
+    vi.mocked(useDeviceStore).mockReturnValue({
+      handleLoginSuccess: mockHandleLoginSuccess,
+    } as any);
+  });
+
+  const createWrapper = () =>
+    mount(LoginView, {
       global: {
-        plugins: [i18n],
+        plugins: [pinia, i18n],
       },
     });
+
+  it("should render correctly and execute handleLoginSuccess on submit", async () => {
+    const wrapper = createWrapper();
 
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
-    expect(wrapper.emitted("login-success")).toBeTruthy();
-    const emittedEvents = wrapper.emitted("login-success") as any[];
-    expect(emittedEvents[0][0]).toMatchObject({
+    expect(mockHandleLoginSuccess).toHaveBeenCalledWith({
       ip: "192.168.88.1",
       user: "admin",
       pass: "secret",
@@ -82,15 +107,10 @@ describe("LoginView.vue", () => {
   });
 
   it("should update input values via NetworkInput bindings", async () => {
-    const wrapper = mount(LoginView, {
-      global: {
-        plugins: [i18n],
-      },
-    });
+    const wrapper = createWrapper();
 
     const inputs = wrapper.findAllComponents({ name: "NetworkInput" });
 
-    // Disparamos el evento de actualización que activa el v-model de cada NetworkInput (Líneas 47-52)
     await inputs[0].vm.$emit("update:modelValue", "10.0.0.1");
     await inputs[1].vm.$emit("update:modelValue", "root");
     await inputs[2].vm.$emit("update:modelValue", "my-secure-pass");
@@ -98,62 +118,47 @@ describe("LoginView.vue", () => {
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
-    expect(wrapper.emitted("login-success")).toBeTruthy();
-    const emittedEvents = wrapper.emitted("login-success") as any[];
-    expect(emittedEvents[0][0]).toMatchObject({
-      ip: "10.0.0.1",
-      user: "root",
-      pass: "my-secure-pass",
-    });
+    expect(mockHandleLoginSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ip: "10.0.0.1",
+        user: "root",
+        pass: "my-secure-pass",
+      })
+    );
   });
 
-  it("should handle rememberPass checkbox toggle and include it in submission", async () => {
-    const wrapper = mount(LoginView, {
-      global: {
-        plugins: [i18n],
-      },
-    });
+  it("should handle rememberPass checkbox toggle and pass it to store action", async () => {
+    const wrapper = createWrapper();
 
-    // Interactuamos directamente con el checkbox nativo para activar la línea del v-model (Línea 64)
     const checkbox = wrapper.find('input[type="checkbox"]#remember');
     await checkbox.setValue(true);
 
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
-    expect(wrapper.emitted("login-success")).toBeTruthy();
-    const emittedEvents = wrapper.emitted("login-success") as any[];
-    expect(emittedEvents[0][0]).toMatchObject({
-      remember: true,
-    });
+    expect(mockHandleLoginSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        remember: true,
+      })
+    );
   });
 
   it("should display loading state and change button text when isLoading is true", async () => {
     mockIsLoading.value = true;
 
-    const wrapper = mount(LoginView, {
-      global: {
-        plugins: [i18n],
-      },
-    });
+    const wrapper = createWrapper();
 
     const button = wrapper.findComponent({ name: "NetworkButton" });
     expect(button.props("isLoading")).toBe(true);
     expect(wrapper.text()).toContain("Connecting...");
-
-    mockIsLoading.value = false;
   });
 
   it("should toggle password visibility", async () => {
-    const wrapper = mount(LoginView, {
-      global: {
-        plugins: [i18n],
-      },
-    });
+    const wrapper = createWrapper();
 
     const passwordInput = wrapper.findAllComponents({ name: "NetworkInput" })[2];
     await passwordInput.vm.$emit("toggle-password");
 
-    expect(passwordInput.props("type")).toBe("text");
+    expect(mockShowPassword.value).toBe(true);
   });
 });

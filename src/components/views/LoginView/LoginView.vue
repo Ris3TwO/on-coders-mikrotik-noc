@@ -4,20 +4,16 @@
  * MikroTik device credentials and handling authentication workflows.
  */
 import { useAuth } from "@/composables";
+import { useDeviceStore } from "@/stores/deviceStore"; // 1. Importar el store
 import NetworkInput from "@/components/atoms/NetworkInput/NetworkInput.vue";
 import NetworkButton from "@/components/atoms/NetworkButton/NetworkButton.vue";
 import { useI18n } from "vue-i18n";
-import { LoginCredentials } from "@/types";
 
 const { t } = useI18n();
-
-const emit = defineEmits<{
-  /** Event emitted when authentication completes successfully */
-  (e: "login-success", credentials: LoginCredentials): void;
-}>();
+const deviceStore = useDeviceStore();
 
 const { ip, user, pass, rememberPass, isLoading, showPassword, handleLogin } = useAuth(
-  (credentials) => emit("login-success", credentials),
+  (credentials) => deviceStore.handleLoginSuccess(credentials),
   t
 );
 </script>

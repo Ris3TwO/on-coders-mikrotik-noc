@@ -1,21 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import { createI18n } from "vue-i18n";
+import { ref } from "vue";
 import App from "./App.vue";
 import { onStatusUpdate, connectDevice, disconnectDevice } from "@/lib/api";
 import NotificationsMock from "../__mocks__/@kyvg/vue3-notification";
+import i18n from "@/i18n";
 
-const i18n = createI18n({
-  legacy: false,
-  locale: "en",
-  messages: {
-    en: {},
-  },
-});
+const isDownloadingRef = ref(false);
+const updateAvailableRef = ref(false);
+const newVersionRef = ref("");
+const installUpdateMock = vi.fn().mockResolvedValue(undefined);
+const checkForUpdatesMock = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-updater", () => ({
+  check: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock("@tauri-apps/plugin-process", () => ({
+  relaunch: vi.fn(),
+}));
+
+vi.mock("@/composables", () => ({
+  useUpdater: () => ({
+    isDownloading: isDownloadingRef,
+    updateAvailable: updateAvailableRef,
+    newVersion: newVersionRef,
+    checkForUpdates: checkForUpdatesMock,
+    installUpdate: installUpdateMock,
+  }),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -48,6 +65,13 @@ vi.mock("@/components/molecules/LanguageSelector/LanguageSelector.vue", () => ({
   },
 }));
 
+vi.mock("@/lib/secureStore", () => ({
+  getCredentials: vi.fn().mockResolvedValue(null),
+  saveCredentials: vi.fn().mockResolvedValue(undefined),
+  clearCredentials: vi.fn().mockResolvedValue(undefined),
+  clearPasswordOnly: vi.fn().mockResolvedValue(undefined),
+}));
+
 describe("App.vue root component", () => {
   let pinia: ReturnType<typeof createPinia>;
 
@@ -55,6 +79,10 @@ describe("App.vue root component", () => {
     vi.clearAllMocks();
     pinia = createPinia();
     setActivePinia(pinia);
+
+    isDownloadingRef.value = false;
+    updateAvailableRef.value = false;
+    newVersionRef.value = "";
   });
 
   const createWrapper = () =>
@@ -85,40 +113,21 @@ describe("App.vue root component", () => {
     const wrapper = createWrapper();
 
     await wrapper.find('[data-testid="login-view"]').trigger("click");
-
     await flushPromises();
 
     expect(connectDevice).toHaveBeenCalledWith("192.168.88.1", "admin", "secret");
     expect(onStatusUpdate).toHaveBeenCalled();
 
-    statusCallback({
-      connected: true,
-      rx_bps: 1024,
-      tx_bps: 2048,
-    });
-
-    await wrapper.vm.$nextTick();
+    statusCallback({ connected: true, rx_bps: 1024, tx_bps: 2048 });
+    await flushPromises();
 
     expect(wrapper.find('[data-testid="login-view"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="dashboard-view"]').exists()).toBe(true);
   });
 
-  it("should catch and log error if connection initialization fails", async () => {
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.mocked(connectDevice).mockRejectedValueOnce(new Error("Connection timeout"));
-
-    const wrapper = createWrapper();
-
-    await wrapper.find('[data-testid="login-view"]').trigger("click");
-
-    expect(consoleSpy).toHaveBeenCalledWith("Initialization failure:", expect.any(Error));
-    consoleSpy.mockRestore();
-  });
-
   it("should render notification types and allow closing them via slot actions", async () => {
     const wrapper = createWrapper();
 
-    // Busca los botones exclusivamente dentro del bloque de notificaciones
     const closeButtons = wrapper.find('[data-testid="notifications"]').findAll("button");
     expect(closeButtons).toHaveLength(5);
 
@@ -129,17 +138,18 @@ describe("App.vue root component", () => {
   });
 
   it("should reset state, disconnect device, and return to LoginView on logout", async () => {
+    vi.mocked(connectDevice).mockResolvedValueOnce(true as any);
     vi.mocked(disconnectDevice).mockReturnValueOnce(undefined as any);
 
     const wrapper = createWrapper();
 
     await wrapper.find('[data-testid="login-view"]').trigger("click");
-    await wrapper.vm.$nextTick();
+    await flushPromises();
 
     expect(wrapper.find('[data-testid="dashboard-view"]').exists()).toBe(true);
 
     await wrapper.find('[data-testid="dashboard-view"]').trigger("click");
-    await wrapper.vm.$nextTick();
+    await flushPromises();
 
     expect(disconnectDevice).toHaveBeenCalled();
     expect(wrapper.find('[data-testid="login-view"]').exists()).toBe(true);
@@ -157,14 +167,10 @@ describe("App.vue root component", () => {
     const wrapper = createWrapper();
 
     await wrapper.find('[data-testid="login-view"]').trigger("click");
+    await flushPromises();
 
-    statusCallback({
-      connected: false,
-      rx_bps: "1024",
-      tx_bps: "2048",
-    });
-
-    await wrapper.vm.$nextTick();
+    statusCallback({ connected: false, rx_bps: "1024", tx_bps: "2048" });
+    await flushPromises();
 
     expect(wrapper.find('[data-testid="dashboard-view"]').exists()).toBe(true);
   });
@@ -180,17 +186,51 @@ describe("App.vue root component", () => {
     const wrapper = createWrapper();
 
     await wrapper.find('[data-testid="login-view"]').trigger("click");
+    await flushPromises();
 
     for (let i = 0; i < 31; i++) {
-      statusCallback({
-        connected: true,
-        rx_bps: i * 10,
-        tx_bps: i * 20,
-      });
+      statusCallback({ connected: true, rx_bps: i * 10, tx_bps: i * 20 });
     }
 
     statusCallback({ connected: true, rx_bps: 0, tx_bps: 0 });
-    await wrapper.vm.$nextTick();
+    await flushPromises();
+
     expect(wrapper.find('[data-testid="dashboard-view"]').exists()).toBe(true);
+  });
+
+  it("should render updater banner and trigger installUpdate on button click when update is available", async () => {
+    updateAvailableRef.value = true;
+    newVersionRef.value = "v1.2.0";
+
+    const wrapper = createWrapper();
+
+    const updateButton = wrapper.find("button.bg-brand-turquoise");
+    expect(updateButton.exists()).toBe(true);
+    expect(updateButton.attributes("disabled")).toBeUndefined();
+
+    await updateButton.trigger("click");
+
+    expect(installUpdateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("should disable button and reflect downloading state when isDownloading is true", async () => {
+    updateAvailableRef.value = true;
+    newVersionRef.value = "v1.2.0";
+    isDownloadingRef.value = true;
+
+    const wrapper = createWrapper();
+
+    const updateButton = wrapper.find("button.bg-brand-turquoise");
+    expect(updateButton.exists()).toBe(true);
+    expect(updateButton.attributes("disabled")).toBeDefined();
+  });
+
+  it("should handle updater check failure gracefully on mount", async () => {
+    checkForUpdatesMock.mockRejectedValueOnce(new Error("Update check failed"));
+
+    const wrapper = createWrapper();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="login-view"]').exists()).toBe(true);
   });
 });
