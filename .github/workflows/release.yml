@@ -1,25 +1,25 @@
-name: "CI/CD - Build Desktop App"
+name: "CD - Release & Updater"
 
 on:
   push:
-    branches:
-      - main
-      - dev
+    tags:
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
-  build:
+  release:
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
         platform: [macos-latest, ubuntu-22_04, windows-latest]
 
     runs-on: ${{ matrix.platform }}
-    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -28,25 +28,8 @@ jobs:
         uses: pnpm/action-setup@v3
         with:
           version: 9
-          run_install: false
 
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Install Rust stable
+      - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
 
       - name: Setup Rust cache
@@ -54,19 +37,23 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Install frontend and system dependencies (Ubuntu)
+      - name: Install system dependencies (Ubuntu)
         if: matrix.platform == 'ubuntu-22_04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - name: Run Tauri Build
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build Tauri App & Publish Release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           tagName: app-v__VERSION__
           releaseName: 'App v__VERSION__'
-          releaseBody: 'Automatic release built from main branch.'
-          releaseDraft: true
+          releaseBody: 'Release automático generado para el sistema de auto-actualización.'
+          releaseDraft: false
           prerelease: false
