@@ -1,6 +1,6 @@
 [package]
 name = "on-coders-mikrotik-noc"
-version = "0.4.1"
+version = "0.5.0"
 description = "On Coder's MikroTik NOC — Network Operations Center & RouterOS Monitor Built with Tauri & Vue"
 authors = ["Manuel Ron (@Ris3TwO) <manuelron.dev@gmail.com>"]
 edition = "2021"
